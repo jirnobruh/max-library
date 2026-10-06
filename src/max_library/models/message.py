@@ -1,12 +1,12 @@
-"""
+﻿"""
 Message models for MAX protocol.
 """
 from typing import Any, Optional
 from pydantic import Field, PrivateAttr
-from max_client.models.base import MaxBaseModel
-from max_client.models.attachment import Attachment
-from max_client.models.reaction import Reactions
-from max_client.models.user import User
+from max_library.models.base import MaxBaseModel
+from max_library.models.attachment import Attachment
+from max_library.models.reaction import Reactions
+from max_library.models.user import User
 
 
 class MessageLink(MaxBaseModel):

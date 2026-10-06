@@ -18,7 +18,7 @@ pip install -e .
 ## Быстрый старт
 ```python
 import asyncio
-from max_client import MaxClient
+from max_library import MaxClient
 
 async def main():
     async with MaxClient(token="YOUR_MAX_TOKEN") as client:

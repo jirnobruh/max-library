@@ -1,9 +1,9 @@
-"""
+﻿"""
 Incoming and outgoing event frame models for MAX protocol.
 """
 from typing import Any
 from pydantic import Field
-from max_client.models.base import MaxBaseModel
+from max_library.models.base import MaxBaseModel
 
 
 class IncomingEvent(MaxBaseModel):

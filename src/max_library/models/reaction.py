@@ -1,9 +1,9 @@
-"""
+﻿"""
 Reaction models for MAX messages.
 """
 from typing import Literal
 from pydantic import Field
-from max_client.models.base import MaxBaseModel
+from max_library.models.base import MaxBaseModel
 
 # Common standard reactions supported by MAX
 EMOJIS = Literal[

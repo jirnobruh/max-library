@@ -1,10 +1,10 @@
-"""
+﻿"""
 User model for MAX.
 """
 from typing import Any
 from pydantic import Field, PrivateAttr, model_validator
-from max_client.models.base import MaxBaseModel
-from max_client.models.contact import Contact
+from max_library.models.base import MaxBaseModel
+from max_library.models.contact import Contact
 
 
 class User(MaxBaseModel):

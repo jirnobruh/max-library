@@ -1,8 +1,8 @@
-"""
+﻿"""
 Built-in message filters.
 """
 from typing import Any, Sequence
-from max_client.filters.base import Filter
+from max_library.filters.base import Filter
 
 
 class TextFilter(Filter):

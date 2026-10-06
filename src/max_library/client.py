@@ -1,4 +1,4 @@
-"""
+﻿"""
 High-level Async MaxClient implementation for MAX Messenger protocol.
 """
 import asyncio
@@ -8,24 +8,24 @@ import time
 from typing import Any, Awaitable, Callable, Optional, Sequence, Union
 from uuid import uuid4
 
-from max_client.exceptions import (
+from max_library.exceptions import (
     AuthError,
     MaxAPIError,
     MaxConnectionError,
     UserNotFoundError,
     VerifyCodeWrong,
 )
-from max_client.filters.base import Filter, check_filter
-from max_client.models.attachment import Attachment
-from max_client.models.chat import Chat
-from max_client.models.contact import Contact
-from max_client.models.event import IncomingEvent
-from max_client.models.message import Message
-from max_client.models.reaction import Reactions
-from max_client.models.user import User
-from max_client.transport.websocket import DEFAULT_WS_URL, MaxTransport
+from max_library.filters.base import Filter, check_filter
+from max_library.models.attachment import Attachment
+from max_library.models.chat import Chat
+from max_library.models.contact import Contact
+from max_library.models.event import IncomingEvent
+from max_library.models.message import Message
+from max_library.models.reaction import Reactions
+from max_library.models.user import User
+from max_library.transport.websocket import DEFAULT_WS_URL, MaxTransport
 
-logger = logging.getLogger("max_client.client")
+logger = logging.getLogger("max_library.client")
 
 MessageHandler = Callable[["MaxClient", Message], Union[Awaitable[Any], Any]]
 ConnectHandler = Callable[["MaxClient"], Union[Awaitable[Any], Any]]
@@ -144,7 +144,7 @@ class MaxClient:
     def _start_workers(self) -> None:
         """Spawns background worker pool to process events from the transport queue."""
         for i in range(self.num_workers):
-            task = asyncio.create_task(self._event_worker(i), name=f"max_client_worker_{i}")
+            task = asyncio.create_task(self._event_worker(i), name=f"max_library_worker_{i}")
             self._worker_tasks.append(task)
 
     async def _event_worker(self, worker_id: int) -> None:

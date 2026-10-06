@@ -1,4 +1,4 @@
-"""
+﻿"""
 Low-level Async WebSocket Transport for MAX Protocol.
 Handles connection lifecycle, heartbeat, auto-reconnect, and RPC dispatching (seq -> Future).
 """
@@ -17,7 +17,7 @@ except ImportError:
 
 from websockets.exceptions import ConnectionClosed
 
-from max_client.exceptions import (
+from max_library.exceptions import (
     MaxAPIError,
     MaxConnectionError,
     MaxTimeoutError,
@@ -25,9 +25,9 @@ from max_client.exceptions import (
     VerifyCodeWrong,
     UserNotFoundError,
 )
-from max_client.models.event import IncomingEvent
+from max_library.models.event import IncomingEvent
 
-logger = logging.getLogger("max_client.transport")
+logger = logging.getLogger("max_library.transport")
 
 DEFAULT_WS_URL = "wss://ws-api.oneme.ru/websocket"
 DEFAULT_HEADERS = {
@@ -123,7 +123,7 @@ class MaxTransport:
             # Start reader loop
             if self._reader_task is None or self._reader_task.done():
                 self._reader_task = asyncio.create_task(
-                    self._read_loop(), name="max_client_ws_reader"
+                    self._read_loop(), name="max_library_ws_reader"
                 )
 
         except Exception as e:
@@ -277,7 +277,7 @@ class MaxTransport:
             if self._is_running and self.auto_reconnect:
                 if self._reconnect_task is None or self._reconnect_task.done():
                     self._reconnect_task = asyncio.create_task(
-                        self._reconnect_loop(), name="max_client_reconnect"
+                        self._reconnect_loop(), name="max_library_reconnect"
                     )
 
     def _dispatch_incoming_frame(self, data: dict[str, Any]) -> None:

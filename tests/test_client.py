@@ -1,13 +1,13 @@
-"""
+﻿"""
 Unit tests for high-level MaxClient operations and message handling.
 """
 import asyncio
 import pytest
 from unittest.mock import AsyncMock
 
-from max_client import MaxClient, filters
-from max_client.models import Message, User
-from max_client.models.event import IncomingEvent
+from max_library import MaxClient, filters
+from max_library.models import Message, User
+from max_library.models.event import IncomingEvent
 
 
 @pytest.fixture

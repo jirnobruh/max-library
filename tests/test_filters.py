@@ -1,9 +1,9 @@
-"""
+﻿"""
 Tests for filter system and boolean operators (&, |, ~).
 """
 import pytest
-from max_client.filters import filters
-from max_client.models import Attachment, Message, User
+from max_library.filters import filters
+from max_library.models import Attachment, Message, User
 
 
 @pytest.fixture

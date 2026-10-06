@@ -1,9 +1,9 @@
-"""
+﻿"""
 Contact and Name models for MAX.
 """
 from typing import Any
 from pydantic import Field, PrivateAttr
-from max_client.models.base import MaxBaseModel
+from max_library.models.base import MaxBaseModel
 
 
 class Name(MaxBaseModel):

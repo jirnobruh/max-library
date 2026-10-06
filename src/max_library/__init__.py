@@ -1,8 +1,8 @@
-"""
+﻿"""
 max-client: Modern Async Python SDK for MAX Messenger (OneMe).
 """
-from max_client.client import MaxClient
-from max_client.exceptions import (
+from max_library.client import MaxClient
+from max_library.exceptions import (
     MaxError,
     MaxAPIError,
     MaxConnectionError,
@@ -11,8 +11,8 @@ from max_client.exceptions import (
     VerifyCodeWrong,
     UserNotFoundError,
 )
-from max_client.filters import filters, Filter
-from max_client.models import (
+from max_library.filters import filters, Filter
+from max_library.models import (
     Attachment,
     Chat,
     Contact,

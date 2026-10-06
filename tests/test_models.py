@@ -1,7 +1,7 @@
-"""
+﻿"""
 Tests for Pydantic models serialization and deserialization.
 """
-from max_client.models import (
+from max_library.models import (
     Attachment,
     Chat,
     Contact,

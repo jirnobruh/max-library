@@ -1,12 +1,12 @@
-"""
+﻿"""
 Unit tests for MaxTransport RPC dispatcher and WebSocket frame routing.
 """
 import asyncio
 import json
 import pytest
 import pytest_asyncio
-from max_client.exceptions import MaxAPIError, MaxTimeoutError, VerifyCodeWrong
-from max_client.transport.websocket import MaxTransport
+from max_library.exceptions import MaxAPIError, MaxTimeoutError, VerifyCodeWrong
+from max_library.transport.websocket import MaxTransport
 
 
 class MockWebSocket:

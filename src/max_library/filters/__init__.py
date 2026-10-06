@@ -1,9 +1,9 @@
-"""
+﻿"""
 Filters module for max-client.
 """
 from typing import Sequence
-from max_client.filters.base import Filter, AndFilter, OrFilter, NotFilter, check_filter
-from max_client.filters.builtin import (
+from max_library.filters.base import Filter, AndFilter, OrFilter, NotFilter, check_filter
+from max_library.filters.builtin import (
     TextFilter,
     CommandFilter,
     ChatIdFilter,
