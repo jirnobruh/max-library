@@ -1,4 +1,4 @@
-﻿"""
+"""
 Unit tests for MaxTransport RPC dispatcher and WebSocket frame routing.
 """
 import asyncio
@@ -164,3 +164,92 @@ async def test_push_event_routing_to_queue(transport, mock_ws):
     assert event.opcode == 128
     assert event.payload["chatId"] == 500
     assert event.payload["message"]["id"] == "push_1"
+
+
+@pytest.mark.asyncio
+async def test_server_heartbeat_ping_responds_with_pong(transport, mock_ws):
+    """Test that MAX server heartbeat ping (opcode 1, cmd 0) triggers automatic pong response."""
+    mock_ws.put_incoming({
+        "ver": 11,
+        "cmd": 0,
+        "seq": 42,
+        "opcode": 1,
+        "payload": None,
+    })
+
+    # Wait for pong to be sent
+    for _ in range(50):
+        if mock_ws.sent_frames:
+            break
+        await asyncio.sleep(0.01)
+
+    assert len(mock_ws.sent_frames) == 1
+    pong = mock_ws.sent_frames[0]
+    assert pong["opcode"] == 1
+    assert pong["cmd"] == 1
+    assert pong["seq"] == 42
+    assert pong["payload"] is None
+
+    # Verify event queue remained empty (opcode 1 is not pushed as normal event)
+    assert transport.incoming_events_queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_client_heartbeat_watchdog_proactive_ping(mock_ws):
+    """Test that watchdog sends proactive client ping when idle time exceeds heartbeat_interval."""
+    import time
+    t = MaxTransport(
+        auto_reconnect=False,
+        heartbeat_interval=0.05,
+        heartbeat_check_interval=0.02,
+        heartbeat_timeout=10.0,
+    )
+    t._ws = mock_ws
+    t._is_connected = True
+    t._is_running = True
+    t._last_received_time = time.monotonic() - 0.06  # Idle past heartbeat_interval but well within heartbeat_timeout
+    t._reader_task = asyncio.create_task(t._read_loop())
+    t._watchdog_task = asyncio.create_task(t._watchdog_loop())
+
+    try:
+        # Wait for watchdog to send proactive ping
+        for _ in range(50):
+            if mock_ws.sent_frames:
+                break
+            await asyncio.sleep(0.01)
+
+        assert len(mock_ws.sent_frames) >= 1
+        ping = mock_ws.sent_frames[0]
+        assert ping["opcode"] == 1
+        assert ping["cmd"] == 0
+        assert ping["payload"] is None
+    finally:
+        await t.close()
+
+
+@pytest.mark.asyncio
+async def test_client_heartbeat_watchdog_zombie_detection(mock_ws):
+    """Test that watchdog closes socket when no frames are received past heartbeat_timeout."""
+    import time
+    t = MaxTransport(
+        auto_reconnect=False,
+        heartbeat_interval=10.0,
+        heartbeat_check_interval=0.02,
+        heartbeat_timeout=0.05,
+    )
+    t._ws = mock_ws
+    t._is_connected = True
+    t._is_running = True
+    t._last_received_time = time.monotonic() - 0.06  # Exceeded heartbeat_timeout
+    t._reader_task = asyncio.create_task(t._read_loop())
+    t._watchdog_task = asyncio.create_task(t._watchdog_loop())
+
+    try:
+        for _ in range(50):
+            if mock_ws.is_closed:
+                break
+            await asyncio.sleep(0.01)
+
+        assert mock_ws.is_closed is True
+    finally:
+        await t.close()

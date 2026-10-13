@@ -1,4 +1,4 @@
-﻿"""
+"""
 Low-level Async WebSocket Transport for MAX Protocol.
 Handles connection lifecycle, heartbeat, auto-reconnect, and RPC dispatching (seq -> Future).
 """
@@ -54,6 +54,9 @@ class MaxTransport:
         reconnect_backoff_factor: float = 2.0,
         ping_interval: float = 25.0,
         ping_timeout: float = 10.0,
+        heartbeat_interval: float = 45.0,
+        heartbeat_timeout: float = 120.0,
+        heartbeat_check_interval: float = 15.0,
     ):
         self.ws_url = ws_url
         self.headers = headers or DEFAULT_HEADERS.copy()
@@ -63,18 +66,24 @@ class MaxTransport:
         self.reconnect_backoff_factor = reconnect_backoff_factor
         self.ping_interval = ping_interval
         self.ping_timeout = ping_timeout
+        self.heartbeat_interval = heartbeat_interval
+        self.heartbeat_timeout = heartbeat_timeout
+        self.heartbeat_check_interval = heartbeat_check_interval
 
         self._ws: Optional[ClientConnection] = None
         self._seq: int = 0
         self._seq_lock = asyncio.Lock()
+        self._send_lock = asyncio.Lock()
 
         self._pending_requests: dict[int, asyncio.Future[dict[str, Any]]] = {}
         self.incoming_events_queue: asyncio.Queue[IncomingEvent] = asyncio.Queue()
 
         self._reader_task: Optional[asyncio.Task] = None
+        self._watchdog_task: Optional[asyncio.Task] = None
         self._reconnect_task: Optional[asyncio.Task] = None
         self._is_running: bool = False
         self._is_connected: bool = False
+        self._last_received_time: float = 0.0
 
         self._on_reconnect_callback: Optional[Callable[[], Awaitable[None]]] = None
 
@@ -103,7 +112,7 @@ class MaxTransport:
         return int(time.time() * 1000)
 
     async def connect(self) -> None:
-        """Establishes the WebSocket connection and starts background reader."""
+        """Establishes the WebSocket connection and starts background reader and watchdog."""
         if self._is_connected and self._ws is not None:
             return
 
@@ -118,13 +127,30 @@ class MaxTransport:
                 ping_timeout=self.ping_timeout,
             )
             self._is_connected = True
+            self._last_received_time = time.monotonic()
             logger.info("WebSocket connected successfully")
 
-            # Start reader loop
-            if self._reader_task is None or self._reader_task.done():
-                self._reader_task = asyncio.create_task(
-                    self._read_loop(), name="max_library_ws_reader"
-                )
+            # Clean up and start reader loop
+            if self._reader_task is not None and not self._reader_task.done():
+                self._reader_task.cancel()
+                try:
+                    await self._reader_task
+                except asyncio.CancelledError:
+                    pass
+            self._reader_task = asyncio.create_task(
+                self._read_loop(), name="max_library_ws_reader"
+            )
+
+            # Clean up and start heartbeat watchdog loop
+            if self._watchdog_task is not None and not self._watchdog_task.done():
+                self._watchdog_task.cancel()
+                try:
+                    await self._watchdog_task
+                except asyncio.CancelledError:
+                    pass
+            self._watchdog_task = asyncio.create_task(
+                self._watchdog_loop(), name="max_library_watchdog"
+            )
 
         except Exception as e:
             self._is_connected = False
@@ -140,6 +166,14 @@ class MaxTransport:
         if self._reconnect_task and not self._reconnect_task.done():
             self._reconnect_task.cancel()
             self._reconnect_task = None
+
+        if self._watchdog_task and not self._watchdog_task.done():
+            self._watchdog_task.cancel()
+            try:
+                await self._watchdog_task
+            except asyncio.CancelledError:
+                pass
+            self._watchdog_task = None
 
         if self._ws:
             try:
@@ -175,7 +209,17 @@ class MaxTransport:
 
         payload_str = json.dumps(data, ensure_ascii=False)
         logger.debug(f"WS SEND: {payload_str}")
-        await self._ws.send(payload_str)
+        async with self._send_lock:
+            if not self.is_connected or not self._ws:
+                raise MaxConnectionError("Cannot send frame: WebSocket is not connected")
+            await self._ws.send(payload_str)
+
+    async def _safe_send_raw_json(self, data: dict[str, Any]) -> None:
+        """Sends a JSON-encoded frame safely in background, logging errors without raising."""
+        try:
+            await self.send_raw_json(data)
+        except Exception as e:
+            logger.debug(f"Failed to send background frame: {e}")
 
     async def send_request(
         self,
@@ -268,11 +312,14 @@ class MaxTransport:
                     logger.warning(f"Failed to parse JSON frame: {raw_msg!r}, error: {e}")
                     continue
 
+                self._last_received_time = time.monotonic()
                 logger.debug(f"WS RECV: {data}")
                 self._dispatch_incoming_frame(data)
 
         finally:
             self._is_connected = False
+            if self._watchdog_task and not self._watchdog_task.done():
+                self._watchdog_task.cancel()
             self._fail_all_pending("WebSocket disconnected")
             if self._is_running and self.auto_reconnect:
                 if self._reconnect_task is None or self._reconnect_task.done():
@@ -292,8 +339,20 @@ class MaxTransport:
                 fut.set_result(data)
             return
 
-        # 2. Skip trivial ping/pong frames
+        # 2. Application heartbeat (opcode 1)
         if opcode == 1:
+            cmd = data.get("cmd")
+            if cmd == 0:
+                # Server sent a ping -> respond with pong immediately
+                pong_frame = {
+                    "ver": 11,
+                    "cmd": 1,
+                    "seq": seq if seq is not None else 0,
+                    "opcode": 1,
+                    "payload": None,
+                }
+                logger.debug(f"Responding to MAX server heartbeat ping (seq={seq})")
+                asyncio.create_task(self._safe_send_raw_json(pong_frame))
             return
 
         # 3. Push event (opcode 128 for messages, or other server pushes)
@@ -302,6 +361,55 @@ class MaxTransport:
             self.incoming_events_queue.put_nowait(event)
         except Exception as e:
             logger.error(f"Failed to parse incoming event frame into model: {e}, frame: {data}")
+
+    async def _watchdog_loop(self) -> None:
+        """
+        Background watchdog loop.
+        Monitors socket health and periodically sends application heartbeats (opcode 1).
+        If no frames are received within heartbeat_timeout, force closes connection to trigger reconnect.
+        """
+        logger.debug("Heartbeat watchdog loop started")
+        try:
+            while self._is_running and self.is_connected:
+                await asyncio.sleep(self.heartbeat_check_interval)
+                if not (self._is_running and self.is_connected):
+                    break
+
+                now = time.monotonic()
+                idle_time = now - self._last_received_time
+
+                # 1. Watchdog timeout: zombie connection detection
+                if idle_time >= self.heartbeat_timeout:
+                    logger.warning(
+                        f"Watchdog detected zombie connection: no incoming frames for {idle_time:.1f}s "
+                        f"(threshold: {self.heartbeat_timeout:.1f}s). Forcing reconnect..."
+                    )
+                    if self._ws:
+                        try:
+                            await self._ws.close()
+                        except Exception as e:
+                            logger.debug(f"Error force closing dead websocket: {e}")
+                    break
+
+                # 2. Idle timeout: send proactive client heartbeat (opcode 1, cmd 0)
+                if idle_time >= self.heartbeat_interval:
+                    seq = await self.next_seq()
+                    ping_frame = {
+                        "ver": 11,
+                        "cmd": 0,
+                        "seq": seq,
+                        "opcode": 1,
+                        "payload": None,
+                    }
+                    logger.debug(f"Sending client application heartbeat ping (seq={seq}, idle={idle_time:.1f}s)")
+                    await self._safe_send_raw_json(ping_frame)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Unexpected error in heartbeat watchdog loop: {e}", exc_info=True)
+        finally:
+            logger.debug("Heartbeat watchdog loop stopped")
 
     def _fail_all_pending(self, reason: str) -> None:
         """Cancels/fails all pending RPC futures when connection breaks."""

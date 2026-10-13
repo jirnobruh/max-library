@@ -1,4 +1,4 @@
-﻿"""
+"""
 max-client: Modern Async Python SDK for MAX Messenger (OneMe).
 """
 from max_library.client import MaxClient
@@ -26,7 +26,7 @@ from max_library.models import (
     EMOJIS,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "MaxClient",

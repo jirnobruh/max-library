@@ -1,4 +1,4 @@
-﻿"""
+"""
 High-level Async MaxClient implementation for MAX Messenger protocol.
 """
 import asyncio
@@ -45,6 +45,8 @@ class MaxClient:
         num_workers: int = 4,
         app_version: str = "4.8.42",
         device_id: str | None = None,
+        heartbeat_interval: float = 45.0,
+        heartbeat_timeout: float = 120.0,
     ):
         self.token = token
         self.phone = phone
@@ -55,6 +57,8 @@ class MaxClient:
         self.transport = MaxTransport(
             ws_url=base_ws_url,
             auto_reconnect=auto_reconnect,
+            heartbeat_interval=heartbeat_interval,
+            heartbeat_timeout=heartbeat_timeout,
         )
         self.transport.set_on_reconnect(self._restore_session_on_reconnect)
 
