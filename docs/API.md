@@ -138,12 +138,15 @@ async def remove_reaction(chat_id: int | str, message_id: int | str, emoji: str)
 ```
 Устанавливает или удаляет реакцию (эмодзи) на указанном сообщении.
 
-#### Контакты и чаты: `get_contacts` / `get_chats`
+#### Контакты и чаты: `get_contacts` / `get_chats` / `get_chat`
 ```python
 async def get_contacts() -> list[Contact]
-async def get_chats() -> list[Chat]
+async def get_chats(count: int = 40, force_refresh: bool = False) -> list[Chat]
+async def get_chat(chat_id: int | str, force_refresh: bool = False) -> Chat
 ```
-Возвращает список сохранённых контактов или чатов текущего аккаунта.
+Возвращает список сохранённых контактов, список чатов (Opcode 19) или детальную информацию о конкретном чате по его идентификатору (Opcode 48).
+У объекта `Chat` доступны поля: `id`, `title`, `display_name`, `type`, `participants_count`, `link`, `base_icon_url`, `description`.
+
 
 #### История чата: `get_chat_history`
 ```python

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Tests for Pydantic models serialization and deserialization.
 """
 from max_library.models import (
@@ -154,3 +154,24 @@ def test_incoming_event_model():
     assert event.seq == 42
     assert event.opcode == 128
     assert event.payload["chatId"] == 12345
+
+
+def test_chat_model():
+    data = {
+        "id": -69130574105108,
+        "title": "Рабочий чат",
+        "type": "CHAT",
+        "participantsCount": 10,
+        "baseIconUrl": "https://img.oneme.ru/icon/chat.jpg",
+        "description": "Описание рабочего чата",
+    }
+    chat = Chat.model_validate(data)
+    assert chat.id == -69130574105108
+    assert chat.title == "Рабочий чат"
+    assert chat.display_name == "Рабочий чат"
+    assert chat.type == "CHAT"
+    assert chat.participants_count == 10
+
+    # Fallback display name when title is None
+    chat_empty = Chat(id=12345)
+    assert chat_empty.display_name == "Чат 12345"

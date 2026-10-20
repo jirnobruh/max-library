@@ -24,6 +24,7 @@ from max_library.exceptions import (
     AuthError,
     VerifyCodeWrong,
     UserNotFoundError,
+    ChatNotFoundError,
 )
 from max_library.models.event import IncomingEvent
 
@@ -285,6 +286,8 @@ class MaxTransport:
             raise AuthError(error=error, title=title, message=message, payload=payload, raw_response=response)
         if "user.not.found" in error or error == "contact.not.found":
             raise UserNotFoundError(error=error, title=title, message=message, payload=payload, raw_response=response)
+        if "chat.not.found" in error:
+            raise ChatNotFoundError(error=error, title=title, message=message, payload=payload, raw_response=response)
 
         raise MaxAPIError(error=error, title=title, message=message, payload=payload, raw_response=response)
 

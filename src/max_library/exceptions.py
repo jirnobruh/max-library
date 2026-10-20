@@ -52,3 +52,9 @@ class VerifyCodeWrong(AuthError):
 class UserNotFoundError(MaxAPIError):
     """Raised when a user is not found by ID or phone number."""
     pass
+
+
+class ChatNotFoundError(MaxAPIError):
+    """Raised when a chat is not found by ID."""
+    pass
+

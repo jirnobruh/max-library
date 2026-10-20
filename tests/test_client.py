@@ -1,4 +1,4 @@
-﻿"""
+"""
 Unit tests for high-level MaxClient operations and message handling.
 """
 import asyncio
@@ -168,3 +168,77 @@ async def test_client_auth_flow():
     assert client.me.id == 9999
 
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_client_get_chat():
+    from max_library.exceptions import ChatNotFoundError
+    from max_library.models import Chat
+
+    client = MaxClient(token="test_token")
+    mock_send = AsyncMock(return_value={
+        "ver": 11,
+        "opcode": 48,
+        "payload": {
+            "chats": [
+                {
+                    "id": -100500,
+                    "title": "General Discussion",
+                    "type": "CHAT",
+                    "participantsCount": 15,
+                }
+            ]
+        },
+    })
+    client.transport.send_request = mock_send
+    client.transport._is_connected = True
+
+    chat = await client.get_chat(-100500)
+    assert isinstance(chat, Chat)
+    assert chat.id == -100500
+    assert chat.title == "General Discussion"
+    assert chat.display_name == "General Discussion"
+    assert mock_send.call_count == 1
+
+    # Second call should hit the cache without calling transport
+    cached_chat = await client.get_chat("-100500")
+    assert cached_chat.title == "General Discussion"
+    assert mock_send.call_count == 1
+
+    # Force refresh should call transport again
+    refreshed_chat = await client.get_chat("-100500", force_refresh=True)
+    assert refreshed_chat.title == "General Discussion"
+    assert mock_send.call_count == 2
+
+    # Not found case
+    mock_send.return_value = {"ver": 11, "opcode": 48, "payload": {"chats": []}}
+    with pytest.raises(ChatNotFoundError):
+        await client.get_chat(999999)
+
+
+@pytest.mark.asyncio
+async def test_client_get_chats_and_session_caching():
+    client = MaxClient(token="test_token")
+    # Simulate session init with 2 chats
+    client._chats_cache = {}
+    mock_send = AsyncMock(return_value={
+        "ver": 11,
+        "opcode": 19,
+        "payload": {
+            "profile": {"id": 1, "names": [{"name": "Owner"}]},
+            "chats": [
+                {"id": 101, "title": "Project Alpha", "type": "CHAT"},
+                {"id": 102, "title": "Project Beta", "type": "CHAT"},
+            ],
+        },
+    })
+    client.transport.send_request = mock_send
+    client.transport._is_connected = True
+
+    chats = await client.get_chats(force_refresh=True)
+    assert len(chats) == 2
+    assert chats[0].title == "Project Alpha"
+    assert chats[1].title == "Project Beta"
+    assert "101" in client._chats_cache
+    assert "102" in client._chats_cache
+

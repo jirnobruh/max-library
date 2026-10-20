@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from max_library.exceptions import (
     AuthError,
+    ChatNotFoundError,
     MaxAPIError,
     MaxConnectionError,
     UserNotFoundError,
@@ -64,6 +65,7 @@ class MaxClient:
 
         self.me: Optional[User] = None
         self._is_running = False
+        self._chats_cache: dict[str, Chat] = {}
 
         self._message_handlers: list[tuple[Optional[Filter | Callable], MessageHandler]] = []
         self._connect_handlers: list[ConnectHandler] = []
@@ -275,6 +277,16 @@ class MaxClient:
         user = User.model_validate(profile).bind_client(self)
         self.me = user
         logger.info(f"Authenticated as: {user.display_name} (ID: {user.id})")
+
+        # Cache initial chats returned in session payload
+        raw_chats = resp_payload.get("chats", [])
+        for raw_chat in raw_chats:
+            try:
+                chat_obj = Chat.model_validate(raw_chat).bind_client(self)
+                self._chats_cache[str(chat_obj.id)] = chat_obj
+            except Exception as e:
+                logger.debug(f"Failed to parse initial chat from session: {e}")
+
         return user
 
     async def _restore_session_on_reconnect(self) -> None:
@@ -623,8 +635,71 @@ class MaxClient:
         return True
 
     # =========================================================================
-    # Chat Actions (Opcode 22, 20)
+    # Chat Actions (Opcode 48, 19, 22, 20)
     # =========================================================================
+
+    async def get_chats(self, count: int = 40, force_refresh: bool = False) -> list[Chat]:
+        """
+        Retrieves list of user chats. Returns cached list from session init unless force_refresh is True.
+        """
+        if not force_refresh and self._chats_cache:
+            return list(self._chats_cache.values())
+
+        if not self.token:
+            raise ValueError("No auth token provided. Authenticate first.")
+
+        resp = await self.transport.send_request(
+            opcode=19,
+            payload={
+                "interactive": True,
+                "token": self.token,
+                "chatsSync": 0,
+                "contactsSync": 0,
+                "presenceSync": 0,
+                "draftsSync": 0,
+                "chatsCount": count,
+            },
+        )
+        chats_data = resp.get("payload", {}).get("chats", [])
+        chats: list[Chat] = []
+        for raw in chats_data:
+            chat = Chat.model_validate(raw).bind_client(self)
+            self._chats_cache[str(chat.id)] = chat
+            chats.append(chat)
+        return chats
+
+    async def get_chat(self, chat_id: int | str, force_refresh: bool = False) -> Chat:
+        """
+        Retrieves detailed chat information by chat ID (Opcode 48).
+        Uses internal session cache unless force_refresh is True.
+        """
+        key = str(chat_id).strip()
+        if not force_refresh and key in self._chats_cache:
+            return self._chats_cache[key]
+
+        cid = int(chat_id) if str(chat_id).lstrip("-").isdigit() else chat_id
+        resp = await self.transport.send_request(
+            opcode=48,
+            payload={"chatIds": [cid]},
+        )
+        chats_data = resp.get("payload", {}).get("chats", [])
+        if not chats_data:
+            raise ChatNotFoundError(error="chat.not.found", message=f"Chat {chat_id} not found")
+
+        chat = Chat.model_validate(chats_data[0]).bind_client(self)
+
+        # For DIALOG chats without explicit title, resolve interlocutor name if possible
+        if not chat.title and chat.type == "DIALOG" and isinstance(chat.participants, dict) and self.me:
+            other_ids = [uid for uid in chat.participants if str(uid) != str(self.me.id)]
+            if other_ids:
+                try:
+                    other_user = await self.get_user(id=other_ids[0])
+                    chat.title = other_user.display_name
+                except Exception as e:
+                    logger.debug(f"Could not resolve interlocutor for dialog {chat_id}: {e}")
+
+        self._chats_cache[key] = chat
+        return chat
 
     async def pin_chat(self, chat_id: int | str) -> bool:
         """Pins a chat (Opcode 22)."""
