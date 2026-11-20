@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "max-library"
-version = "0.3.0"
+version = "0.4.0"
 description = "Async Python SDK for MAX Messenger protocol (web.oneme.ru / ws-api.oneme.ru)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,6 +28,8 @@ dependencies = [
     "websockets>=13.0",
     "aiohttp>=3.9.0",
     "pydantic>=2.0.0",
+    "msgpack>=1.0.0",
+    "lz4>=4.0.0",
 ]
 
 [project.optional-dependencies]

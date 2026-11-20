@@ -27,7 +27,7 @@ from max_library.models import (
     EMOJIS,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "MaxClient",

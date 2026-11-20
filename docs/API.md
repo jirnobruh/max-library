@@ -32,18 +32,15 @@ from max_library import MaxClient
 ```python
 MaxClient(
     token: str | None = None,
-    ws_url: str = "wss://ws-api.oneme.ru/websocket",
-    headers: dict | None = None,
-    ping_interval: float = 30.0,
-    request_timeout: float = 10.0,
-    reconnect_attempts: int = 10,
-    reconnect_delay: float = 2.0
+    base_ws_url: str = "wss://api.oneme.ru/websocket",
+    auto_reconnect: bool = True,
+    app_version: str = "26.11.9",
 )
 ```
 
 - **`token`**: Токен авторизации пользователя MAX (если не передан, можно авторизоваться по номеру телефона и SMS-коду).
-- **`ws_url`**: WebSocket endpoint (по умолчанию `wss://ws-api.oneme.ru/websocket`).
-- **`headers`**: Дополнительные HTTP-заголовки подключения (Origin по умолчанию `https://web.oneme.ru`).
+- **`base_ws_url`**: WebSocket endpoint (по умолчанию `wss://api.oneme.ru/websocket`).
+- **`headers`**: Дополнительные HTTP-заголовки подключения (Origin по умолчанию `https://web.max.ru`).
 - **`ping_interval`**: Интервал отправки пинг-пакетов (в секундах).
 - **`request_timeout`**: Таймаут ожидания RPC-ответа от сервера на отправленный запрос.
 - **`reconnect_attempts`**: Максимальное количество попыток переподключения при разрыве соединения.

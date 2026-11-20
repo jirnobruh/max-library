@@ -27,15 +27,16 @@ from max_library.exceptions import (
     ChatNotFoundError,
 )
 from max_library.models.event import IncomingEvent
+from max_library.transport.protocol import encode_packet, decode_packet
 
 logger = logging.getLogger("max_library.transport")
 
-DEFAULT_WS_URL = "wss://ws-api.oneme.ru/websocket"
+DEFAULT_WS_URL = "wss://api.oneme.ru/websocket"
 DEFAULT_HEADERS = {
-    "Origin": "https://web.oneme.ru",
+    "Origin": "https://web.max.ru",
     "Pragma": "no-cache",
     "Cache-Control": "no-cache",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
 }
 
 
@@ -203,24 +204,56 @@ class MaxTransport:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self.close()
 
-    async def send_raw_json(self, data: dict[str, Any]) -> None:
-        """Sends a JSON-encoded frame over the active WebSocket."""
+    async def send_packet(
+        self,
+        cmd: int,
+        seq: int,
+        opcode: int,
+        payload: Any = None,
+        compress: bool = False,
+    ) -> None:
+        """Sends a binary-encoded MAX protocol frame over the active WebSocket."""
         if not self.is_connected or not self._ws:
             raise MaxConnectionError("Cannot send frame: WebSocket is not connected")
 
-        payload_str = json.dumps(data, ensure_ascii=False)
-        logger.debug(f"WS SEND: {payload_str}")
+        packet_bytes = encode_packet(cmd=cmd, seq=seq, opcode=opcode, payload=payload, compress=compress)
+        logger.debug(f"WS SEND: cmd={cmd}, seq={seq}, opcode={opcode}, len={len(packet_bytes)}")
         async with self._send_lock:
             if not self.is_connected or not self._ws:
                 raise MaxConnectionError("Cannot send frame: WebSocket is not connected")
-            await self._ws.send(payload_str)
+            await self._ws.send(packet_bytes)
 
-    async def _safe_send_raw_json(self, data: dict[str, Any]) -> None:
-        """Sends a JSON-encoded frame safely in background, logging errors without raising."""
+    async def _safe_send_packet(
+        self,
+        cmd: int,
+        seq: int,
+        opcode: int,
+        payload: Any = None,
+        compress: bool = False,
+    ) -> None:
+        """Sends a binary frame safely in background, logging errors without raising."""
         try:
-            await self.send_raw_json(data)
+            await self.send_packet(cmd=cmd, seq=seq, opcode=opcode, payload=payload, compress=compress)
         except Exception as e:
             logger.debug(f"Failed to send background frame: {e}")
+
+    # Backward-compatible alias for existing tests/callers
+    async def send_raw_json(self, data: dict[str, Any]) -> None:
+        """Sends a frame over WebSocket (encodes to binary protocol)."""
+        cmd = data.get("cmd", 0)
+        seq = data.get("seq", 0)
+        opcode = data.get("opcode", 0)
+        payload = data.get("payload")
+        await self.send_packet(cmd=cmd, seq=seq, opcode=opcode, payload=payload)
+
+    async def _safe_send_raw_json(self, data: dict[str, Any]) -> None:
+        """Safely sends a frame over WebSocket."""
+        await self._safe_send_packet(
+            cmd=data.get("cmd", 0),
+            seq=data.get("seq", 0),
+            opcode=data.get("opcode", 0),
+            payload=data.get("payload"),
+        )
 
     async def send_request(
         self,
@@ -240,16 +273,8 @@ class MaxTransport:
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
         self._pending_requests[seq] = future
 
-        frame = {
-            "ver": 11,
-            "cmd": 0,
-            "seq": seq,
-            "opcode": opcode,
-            "payload": payload,
-        }
-
         try:
-            await self.send_raw_json(frame)
+            await self.send_packet(cmd=0, seq=seq, opcode=opcode, payload=payload)
             response = await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError as e:
             logger.warning(f"RPC request timeout: opcode={opcode}, seq={seq}")
@@ -267,12 +292,13 @@ class MaxTransport:
     @staticmethod
     def _check_response_error(response: dict[str, Any], opcode: int) -> None:
         """Inspects response frame and raises mapped exception if server returned error."""
+        cmd = response.get("cmd")
         payload = response.get("payload", {})
         if not isinstance(payload, dict):
             return
 
         error = payload.get("error")
-        if not error:
+        if not error and cmd != 3:
             return
 
         title = payload.get("title")
@@ -284,12 +310,12 @@ class MaxTransport:
             raise VerifyCodeWrong(error=error, title=title, message=message, payload=payload, raw_response=response)
         if error in ("auth.error", "token.invalid", "session.not_found"):
             raise AuthError(error=error, title=title, message=message, payload=payload, raw_response=response)
-        if "user.not.found" in error or error == "contact.not.found":
+        if error and ("user.not.found" in error or error == "contact.not.found"):
             raise UserNotFoundError(error=error, title=title, message=message, payload=payload, raw_response=response)
-        if "chat.not.found" in error:
+        if error and "chat.not.found" in error:
             raise ChatNotFoundError(error=error, title=title, message=message, payload=payload, raw_response=response)
 
-        raise MaxAPIError(error=error, title=title, message=message, payload=payload, raw_response=response)
+        raise MaxAPIError(error=error or "unknown_error", title=title, message=message, payload=payload, raw_response=response)
 
     async def _read_loop(self) -> None:
         """Continuous background loop for receiving and dispatching frames."""
@@ -310,9 +336,15 @@ class MaxTransport:
                     continue
 
                 try:
-                    data = json.loads(raw_msg)
+                    if isinstance(raw_msg, bytes):
+                        data = decode_packet(raw_msg)
+                    elif isinstance(raw_msg, str):
+                        data = json.loads(raw_msg)
+                    else:
+                        logger.warning(f"Unknown frame type: {type(raw_msg)}")
+                        continue
                 except Exception as e:
-                    logger.warning(f"Failed to parse JSON frame: {raw_msg!r}, error: {e}")
+                    logger.warning(f"Failed to parse frame: {raw_msg!r}, error: {e}")
                     continue
 
                 self._last_received_time = time.monotonic()
@@ -346,16 +378,11 @@ class MaxTransport:
         if opcode == 1:
             cmd = data.get("cmd")
             if cmd == 0:
-                # Server sent a ping -> respond with pong immediately
-                pong_frame = {
-                    "ver": 11,
-                    "cmd": 1,
-                    "seq": seq if seq is not None else 0,
-                    "opcode": 1,
-                    "payload": None,
-                }
+                # Server sent a ping -> respond with pong immediately (cmd 1, opcode 1)
                 logger.debug(f"Responding to MAX server heartbeat ping (seq={seq})")
-                asyncio.create_task(self._safe_send_raw_json(pong_frame))
+                asyncio.create_task(
+                    self._safe_send_packet(cmd=1, seq=seq if seq is not None else 0, opcode=1, payload=None)
+                )
             return
 
         # 3. Push event (opcode 128 for messages, or other server pushes)
@@ -397,15 +424,8 @@ class MaxTransport:
                 # 2. Idle timeout: send proactive client heartbeat (opcode 1, cmd 0)
                 if idle_time >= self.heartbeat_interval:
                     seq = await self.next_seq()
-                    ping_frame = {
-                        "ver": 11,
-                        "cmd": 0,
-                        "seq": seq,
-                        "opcode": 1,
-                        "payload": None,
-                    }
                     logger.debug(f"Sending client application heartbeat ping (seq={seq}, idle={idle_time:.1f}s)")
-                    await self._safe_send_raw_json(ping_frame)
+                    await self._safe_send_packet(cmd=0, seq=seq, opcode=1, payload=None)
 
         except asyncio.CancelledError:
             pass

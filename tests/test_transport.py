@@ -9,25 +9,37 @@ from max_library.exceptions import MaxAPIError, MaxTimeoutError, VerifyCodeWrong
 from max_library.transport.websocket import MaxTransport
 
 
+from max_library.transport.protocol import encode_packet, decode_packet
+
+
 class MockWebSocket:
     """Mock WebSocket client connection simulating duplex async frames."""
 
     def __init__(self):
         self.sent_frames: list[dict] = []
-        self.recv_queue: asyncio.Queue[str] = asyncio.Queue()
+        self.recv_queue: asyncio.Queue[bytes | str] = asyncio.Queue()
         self.is_closed = False
 
-    async def send(self, data: str):
-        self.sent_frames.append(json.loads(data))
+    async def send(self, data: bytes | str):
+        if isinstance(data, bytes):
+            self.sent_frames.append(decode_packet(data))
+        else:
+            self.sent_frames.append(json.loads(data))
 
-    async def recv(self) -> str:
+    async def recv(self) -> bytes | str:
         return await self.recv_queue.get()
 
     async def close(self):
         self.is_closed = True
 
     def put_incoming(self, frame_dict: dict):
-        self.recv_queue.put_nowait(json.dumps(frame_dict))
+        # Convert dictionary to binary packet format
+        cmd = frame_dict.get("cmd", 0)
+        seq = frame_dict.get("seq", 0)
+        opcode = frame_dict.get("opcode", 0)
+        payload = frame_dict.get("payload")
+        packet_bytes = encode_packet(cmd=cmd, seq=seq, opcode=opcode, payload=payload)
+        self.recv_queue.put_nowait(packet_bytes)
 
 
 @pytest.fixture
