@@ -158,7 +158,7 @@ def test_incoming_event_model():
 
 def test_chat_model():
     data = {
-        "id": -69130574105108,
+        "id": -100999888777,
         "title": "Рабочий чат",
         "type": "CHAT",
         "participantsCount": 10,
@@ -166,7 +166,7 @@ def test_chat_model():
         "description": "Описание рабочего чата",
     }
     chat = Chat.model_validate(data)
-    assert chat.id == -69130574105108
+    assert chat.id == -100999888777
     assert chat.title == "Рабочий чат"
     assert chat.display_name == "Рабочий чат"
     assert chat.type == "CHAT"

@@ -257,18 +257,18 @@ async def test_client_get_file_and_video_download_url():
     client.transport.send_request = mock_send
 
     url = await client.get_file_download_url(
-        chat_id="-69130574105108",
-        message_id="117636614938837567",
-        file_id="5732900036",
+        chat_id="-100999888777",
+        message_id="998877665544332211",
+        file_id="8877665544",
     )
     assert url == "https://fd.oneme.ru/getfile?rq=test1234"
     mock_send.assert_called_once()
     payload = mock_send.call_args[1]["payload"]
-    assert payload["chatId"] == -69130574105108
+    assert payload["chatId"] == -100999888777
     assert isinstance(payload["messageId"], int)
-    assert payload["messageId"] == 117636614938837567
+    assert payload["messageId"] == 998877665544332211
     assert isinstance(payload["fileId"], int)
-    assert payload["fileId"] == 5732900036
+    assert payload["fileId"] == 8877665544
 
     # Test video download url
     mock_send.return_value = {
