@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>Асинхронная Python-библиотека (SDK) для работы с корпоративным мессенджером MAX</b><br>
-  <i>(<code>web.oneme.ru</code> / <code>ws-api.oneme.ru</code>)</i>
+  <i>(<code>web.max.ru</code> / <code>api.oneme.ru/websocket</code>)</i>
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 
 ## ⚡ О библиотеке
 
-`max-library` — это современная, полностью асинхронная клиентская библиотека на Python для взаимодействия с мессенджером **MAX** через WebSocket API.
+`max-library` — это современная, полностью асинхронная клиентская библиотека на Python для взаимодействия с мессенджером **MAX** через WebSocket API по бинарному протоколу MsgPack v10.
 
 Библиотека создана для построения надежных сервисов, интеграций и ботов. Она решает классические проблемы блокировок и обрывов соединений благодаря разделению чтения входящих пакетов, RPC-диспетчеризации по sequence ID и автоматическому поддержанию соединения.
 
@@ -27,8 +27,8 @@
 - ⚡ **Надежная RPC-диспетчеризация:** Запросы сопоставляются с ответами через уникальные `seq`-номера и `asyncio.Future`, исключая коллизии параллельных вызовов.
 - 🛡️ **Строгая типизация (Pydantic v2):** Все входящие и исходящие события, сообщения, пользователи, чаты и вложения типизированы и валидируются моделями Pydantic.
 - 🎯 **Декларативные фильтры событий:** Удобная система фильтрации входящих сообщений (`filters.text`, `filters.chat_id`, `filters.has_attachments`, поддержка логических операторов `&`, `|`, `~`).
-- 📎 **Поддержка файлов и медиа:** Разрешение прямых ссылок на скачивание любых файлов и документов из MAX через внутренний протокол (Opcode 88).
-- 💬 **Реакции и ссылки:** Поддержка отправки реакций-эмодзи и парсинг пересланных сообщений / ответов (`FORWARD`, `REPLY`).
+- 📎 **Поддержка файлов и медиа:** Разрешение прямых ссылок на скачивание любых файлов и документов (Opcode 88) и видео (Opcode 83) через внутренний протокол MAX.
+- 💬 **Реакции и ссылки:** Поддержка установки реакций-эмодзи и парсинг пересланных сообщений / ответов (`FORWARD`, `REPLY`).
 
 ---
 
@@ -44,7 +44,7 @@ pip install max-library
 
 Для работы с библиотекой требуется авторизационный токен вашей сессии в веб-версии MAX:
 
-1. Откройте веб-клиент мессенджера MAX в браузере ([web.oneme.ru](https://web.oneme.ru)) и авторизуйтесь.
+1. Откройте веб-клиент мессенджера MAX в браузере ([web.max.ru](https://web.max.ru)) и авторизуйтесь.
 2. Нажмите клавишу **`F12`** (Инструменты разработчика браузера).
 3. Перейдите во вкладку **Network** («Сеть») и выберите фильтр **Socket** (или **WS**).
 4. Перезагрузите страницу клавишей **`F5`**.
@@ -124,49 +124,53 @@ async def handle_files(message):
 ```
 
 ### Получение прямой ссылки на скачивание файла
-
-Файлы и документы в MAX приходят с идентификатором `file_id`. Библиотека позволяет получить прямую CDN-ссылку на скачивание:
-
+ 
+Файлы и документы в MAX приходят с идентификатором `file_id`, а видео — с `video_id`. Библиотека позволяет получить прямую CDN-ссылку на скачивание:
+ 
 ```python
-@client.on_message(filters.has_attachments("FILE"))
+@client.on_message(filters.has_attachments("FILE") | filters.has_attachments("VIDEO"))
 async def handle_incoming_file(message):
     for attachment in message.attachments:
+        # Способ 1: через удобный метод вложения
+        download_url = await attachment.get_download_url(message, client=client)
+        if download_url:
+            print(f"Файл {attachment.name}: {download_url}")
+
+        # Способ 2: напрямую через RPC клиента
         if attachment.file_id:
-            # Запрашиваем URL для скачивания через RPC (Opcode 88)
-            download_url = await client.get_file_download_url(
+            url = await client.get_file_download_url(
                 chat_id=message.chat_id,
                 message_id=message.id,
                 file_id=attachment.file_id
             )
-            print(f"Файл {attachment.name}: {download_url}")
+            print(f"Прямая ссылка: {url}")
 ```
 
-### Отправка реакций
+### Установка реакций
 
 ```python
 @client.on_message()
 async def add_reaction_to_msg(message):
-    # Поставить реакцию ❤️ на сообщение
-    await client.add_reaction(
+    # Поставить реакцию ❤️ на сообщение (Opcode 178)
+    await client.set_reaction(
         chat_id=message.chat_id,
         message_id=message.id,
-        emoji="❤️"
+        reaction="❤️"
     )
 ```
 
-### Получение списка чатов и контактов
+### Получение списка чатов и профиля пользователя
 
 ```python
 async with MaxClient(token="YOUR_TOKEN") as client:
-    # Список контактов
-    contacts = await client.get_contacts()
-    for contact in contacts:
-        print(f"Контакт: {contact.name} (ID: {contact.user_id})")
+    # Информация о пользователе по ID или номеру телефона
+    user = await client.get_user(id=12345678)
+    print(f"Пользователь: {user.display_name} (ID: {user.id})")
 
-    # Список чатов
+    # Список чатов (с кэшированием)
     chats = await client.get_chats()
     for chat in chats:
-        print(f"Чат: {chat.title} (ID: {chat.id})")
+        print(f"Чат: {chat.display_name} (ID: {chat.id})")
 ```
 
 ---
