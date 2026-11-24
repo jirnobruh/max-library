@@ -517,8 +517,8 @@ class MaxClient:
         Retrieves direct download URL for a file attachment (Opcode 88).
         """
         cid = int(chat_id) if str(chat_id).lstrip("-").isdigit() else chat_id
-        fid = int(file_id) if str(file_id).isdigit() else file_id
-        mid = str(message_id)
+        fid = int(file_id) if str(file_id).lstrip("-").isdigit() else file_id
+        mid = int(message_id) if str(message_id).isdigit() else message_id
         resp = await self.transport.send_request(
             opcode=88,
             payload={
@@ -529,6 +529,36 @@ class MaxClient:
             },
         )
         return resp.get("payload", {}).get("url")
+
+    async def get_video_download_url(
+        self,
+        chat_id: int | str,
+        message_id: int | str,
+        video_id: int | str,
+        token: str | None = None,
+        item_type: str = "REGULAR",
+    ) -> str | None:
+        """
+        Retrieves direct download URL for a video attachment (Opcode 83).
+        """
+        cid = int(chat_id) if str(chat_id).lstrip("-").isdigit() else chat_id
+        vid = int(video_id) if str(video_id).lstrip("-").isdigit() else video_id
+        mid = int(message_id) if str(message_id).isdigit() else message_id
+        payload: dict[str, Any] = {
+            "chatId": cid,
+            "messageId": mid,
+            "videoId": vid,
+            "itemType": item_type,
+        }
+        if token:
+            payload["token"] = token
+        resp = await self.transport.send_request(opcode=83, payload=payload)
+        p = resp.get("payload", {})
+        if isinstance(p, dict):
+            for res_key in ["MP4_1080", "MP4_720", "MP4_480", "MP4_360", "MP4_240", "MP4_144", "url"]:
+                if p.get(res_key):
+                    return p[res_key]
+        return None
 
     # =========================================================================
     # Reactions (Opcode 178)

@@ -242,3 +242,46 @@ async def test_client_get_chats_and_session_caching():
     assert "101" in client._chats_cache
     assert "102" in client._chats_cache
 
+
+@pytest.mark.asyncio
+async def test_client_get_file_and_video_download_url():
+    client = MaxClient(token="test_token")
+    mock_send = AsyncMock(return_value={
+        "ver": 10,
+        "opcode": 88,
+        "payload": {
+            "url": "https://fd.oneme.ru/getfile?rq=test1234",
+            "unsafe": False,
+        },
+    })
+    client.transport.send_request = mock_send
+
+    url = await client.get_file_download_url(
+        chat_id="-69130574105108",
+        message_id="117636614938837567",
+        file_id="5732900036",
+    )
+    assert url == "https://fd.oneme.ru/getfile?rq=test1234"
+    mock_send.assert_called_once()
+    payload = mock_send.call_args[1]["payload"]
+    assert payload["chatId"] == -69130574105108
+    assert isinstance(payload["messageId"], int)
+    assert payload["messageId"] == 117636614938837567
+    assert isinstance(payload["fileId"], int)
+    assert payload["fileId"] == 5732900036
+
+    # Test video download url
+    mock_send.return_value = {
+        "ver": 10,
+        "opcode": 83,
+        "payload": {
+            "MP4_720": "https://video.oneme.ru/720.mp4",
+        },
+    }
+    v_url = await client.get_video_download_url(
+        chat_id=123,
+        message_id=456,
+        video_id=789,
+    )
+    assert v_url == "https://video.oneme.ru/720.mp4"
+
