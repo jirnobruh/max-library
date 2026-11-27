@@ -28,7 +28,7 @@ from max_library.models import (
 )
 from max_library import auth
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 __all__ = [
     "MaxClient",

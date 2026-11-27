@@ -491,6 +491,20 @@ class MaxClient:
         )
 
     @classmethod
+    async def create_qr_session(
+        cls,
+        base_ws_url: str = DEFAULT_WS_URL,
+        app_version: str = "26.11.9",
+    ):
+        """
+        Initiates a new QR authentication session and returns a QRAuthSession.
+        Ideal for web applications, dashboards, and bots that need to extract
+        the QR URL / SVG for rendering on a website or client app.
+        """
+        from max_library.auth.qr import create_qr_session
+        return await create_qr_session(base_ws_url=base_ws_url, app_version=app_version)
+
+    @classmethod
     def save_token_to_env(
         cls,
         token: str,

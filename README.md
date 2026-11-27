@@ -60,7 +60,7 @@ pip install max-library
    * Наведите камеру телефона на QR-код в терминале.
 4. Консоль мгновенно зафиксирует подтверждение, отобразит профиль и сохранит `MAX_TOKEN=An_...` в файл `.env`.
 
-#### В коде Python:
+#### В коде Python (CLI / простой скрипт):
 
 ```python
 from max_library import MaxClient
@@ -68,6 +68,29 @@ from max_library import MaxClient
 # Авторизоваться по QR-коду и получить готового клиента:
 client = await MaxClient.from_qr(auto_save_env=True)
 print(f"Авторизован как: {client.me.display_name}")
+```
+
+#### Интеграция в сайты, веб-сервисы и боты (Web / API):
+
+Если вы разрабатываете веб-сайт, сервис или Telegram-бота и хотите отображать QR-код пользователю на веб-странице или в приложении:
+
+```python
+from max_library import MaxClient
+
+# 1. Создаем асинхронную QR-сессию
+async with await MaxClient.create_qr_session() as session:
+    # Прямая ссылка авторизации (для передачи на фронтенд в библиотеку QR):
+    print("Ссылка для QR:", session.qr_link)
+    
+    # Готовый Data URL для мгновенной вставки в <img src="..."> на сайте:
+    img_data_url = session.to_data_url()
+    
+    # Или чистый векторный SVG:
+    svg_markup = session.to_svg()
+    
+    # 2. Ожидаем подтверждения от мобильного приложения MAX:
+    token, user = await session.wait_for_login()
+    print(f"Пользователь {user.display_name} успешно авторизовался! Токен: {token}")
 ```
 
 ---

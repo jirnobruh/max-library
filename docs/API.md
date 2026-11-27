@@ -8,13 +8,19 @@
 
 1. [Клиент: `MaxClient`](#клиент-maxclient)
    - [Конструктор](#конструктор)
+   - [Фабричные методы и хелперы авторизации](#фабричные-методы-и-хелперы-авторизации)
    - [Жизненный цикл](#жизненный-цикл)
    - [Декораторы событий](#декораторы-событий)
    - [Методы API](#методы-api)
-2. [Система фильтрации сообщений (`filters`)](#система-фильтрации-сообщений-filters)
-3. [Модели данных (Pydantic v2)](#модели-данных-pydantic-v2)
-4. [Исключения (`exceptions`)](#исключения-exceptions)
-5. [Архитектура транспорта (`MaxTransport`)](#архитектура-транспорта-maxtransport)
+2. [Пакет авторизации (`max_library.auth`) и CLI](#пакет-авторизации-max_libraryauth-и-cli)
+   - [QR-код авторизация: класс `QRAuthSession`](#qr-код-авторизация-класс-qrauthsession)
+   - [Функции модуля `auth`](#функции-модуля-auth)
+   - [Консольная утилита CLI (`max-auth`)](#консольная-утилита-cli-max-auth)
+3. [Система фильтрации сообщений (`filters`)](#система-фильтрации-сообщений-filters)
+4. [Модели данных (Pydantic v2)](#модели-данных-pydantic-v2)
+5. [Исключения (`exceptions`)](#исключения-exceptions)
+6. [Архитектура транспорта (`MaxTransport`)](#архитектура-транспорта-maxtransport)
+
 
 ---
 
@@ -54,10 +60,52 @@ MaxClient(
 - **`heartbeat_timeout`**: Таймаут ожидания понга перед переподключением (по умолчанию `120.0` с).
 
 > **Как получить `token`:**
-> 1. **Автоматически:** через CLI `python -m max_library auth` или в коде `client = MaxClient.from_browser()`.
-> 2. **Вручную:** откройте [web.max.ru](https://web.max.ru) в браузере -> `F12` -> вкладка `Application` -> `Local Storage` -> `https://web.max.ru` -> ключ `__oneme_auth` (значение `An_...`). Либо вкладка `Network` -> `Socket` -> `F5` -> `websocket` -> `Messages` -> 3-е исходящее `↑ Binary Message` (UTF-8).
+> 1. **По QR-коду (рекомендуется для серверов/VPS/ПК):** через CLI `python -m max_library auth --qr` или в коде `client = await MaxClient.from_qr()`.
+> 2. **Автоматически из браузера (для ПК):** через CLI `python -m max_library auth` или в коде `client = MaxClient.from_browser()`.
+> 3. **Вручную:** откройте [web.max.ru](https://web.max.ru) в браузере -> `F12` -> вкладка `Application` -> `Local Storage` -> `https://web.max.ru` -> ключ `__oneme_auth` (значение `An_...`). Либо вкладка `Network` -> `Socket` -> `F5` -> `websocket` -> `Messages` -> 3-е исходящее `↑ Binary Message` (UTF-8).
 
 ### Фабричные методы и хелперы авторизации
+
+#### `MaxClient.from_qr(...)`
+```python
+@classmethod
+async def from_qr(
+    cls,
+    qr_callback: Optional[Callable[[str, str], Union[Awaitable[None], None]]] = None,
+    password_callback: Optional[Callable[[], Union[Awaitable[str], str]]] = None,
+    auto_save_env: bool = False,
+    env_file_path: str = ".env",
+    var_name: str = "MAX_TOKEN",
+    base_ws_url: str = "wss://api.oneme.ru/websocket",
+    timeout: float = 120.0,
+    **client_kwargs,
+) -> MaxClient
+```
+Интерактивно запускает авторизацию по QR-коду через мобильное приложение MAX, выводит QR-код в консоль (или передает в `qr_callback`), дожидается подтверждения с телефона и возвращает готовый к работе экземпляр `MaxClient`. Если `auto_save_env=True`, автоматически записывает полученный токен в `.env`.
+
+#### `MaxClient.create_qr_session(...)`
+```python
+@classmethod
+async def create_qr_session(
+    cls,
+    base_ws_url: str = "wss://api.oneme.ru/websocket",
+    app_version: str = "26.11.9",
+) -> QRAuthSession
+```
+Создает новую QR-сессию авторизации и возвращает объект `QRAuthSession`. Идеально подходит для сайтов, веб-панелей и ботов, где требуется разделить отдачу QR-кода пользователю (в виде URL, SVG или Data URL) и асинхронное ожидание подтверждения.
+
+#### `MaxClient.login_by_qr(...)`
+```python
+@classmethod
+async def login_by_qr(
+    cls,
+    qr_callback: Optional[Callable[[str, str], Union[Awaitable[None], None]]] = None,
+    password_callback: Optional[Callable[[], Union[Awaitable[str], str]]] = None,
+    base_ws_url: str = "wss://api.oneme.ru/websocket",
+    timeout: float = 120.0,
+) -> tuple[str, User]
+```
+Низкоуровневая авторизация по QR-коду. Возвращает кортеж `(token, user)`.
 
 #### `MaxClient.from_browser(...)`
 ```python
@@ -255,7 +303,145 @@ async def session_exit() -> bool
 
 ---
 
-## Система фильтрации сообщений (`filters`)
+## Пакет авторизации (`max_library.auth`) и CLI
+
+Пакет `max_library.auth` отвечает за обнаружение и генерацию токенов авторизации для работы с библиотекой.
+
+Импорт:
+```python
+from max_library.auth import (
+    QRAuthSession,
+    create_qr_session,
+    login_by_qr,
+    generate_qr_svg,
+    generate_qr_data_url,
+    render_qr_ascii,
+    extract_token_from_browser,
+    login_by_phone,
+    verify_token,
+    save_token_to_env,
+)
+```
+
+---
+
+### QR-код авторизация: класс `QRAuthSession`
+
+Класс для управления активной сессией авторизации по QR-коду. Позволяет веб-приложениям, панелям управления и Telegram-ботам разделять шаг получения данных QR (ссылка, векторный SVG или Data URL) и асинхронное ожидание подтверждения пользователем на смартфоне.
+
+#### Создание сессии (`create_qr_session`):
+```python
+session = await create_qr_session(base_ws_url="wss://api.oneme.ru/websocket", app_version="26.11.9")
+# или через клиент:
+session = await MaxClient.create_qr_session()
+```
+
+#### Поля экземпляра `QRAuthSession`:
+- **`qr_link`**: `str` — Прямой URL авторизации (например, `https://max.ru/:auth/7deea5ff-...`). Этот URL можно передать на фронтенд для рендеринга любым QR-компонентом.
+- **`track_id`**: `str` — Уникальный строковый UUID сессии привязки на сервере MAX.
+- **`ttl`**: `float` — Время жизни сессии в секундах (по умолчанию 120 с).
+- **`polling_interval`**: `float` — Рекомендуемый сервером интервал опроса статуса (по умолчанию 5 с).
+- **`expires_at`**: `int | None` — Unix-timestamp в миллисекундах окончания действия QR-кода.
+
+#### Методы `QRAuthSession`:
+- **`to_svg(border: int = 2) -> str`**:  
+  Возвращает чистую XML-разметку векторного SVG. Не требует сторонних библиотек обработки изображений. Можно напрямую вставлять в HTML-код страницы.
+- **`to_data_url(border: int = 2) -> str`**:  
+  Возвращает строку вида `data:image/svg+xml;base64,...`, готовую для использования в атрибуте `src` тега `<img>` на сайте: `<img src="{session.to_data_url()}" />`.
+- **`to_ascii(border: int = 2) -> str`**:  
+  Возвращает высококонтрастное ANSI-представление QR-кода для вывода в консоль (черные блоки на чистом белом фоне).
+- **`await wait_for_login(timeout: Optional[float] = None, password_callback=None) -> tuple[str, User]`**:  
+  Опрашивает сервер MAX (Opcode 289) до момента сканирования QR-кода пользователем в мобильном приложении MAX. При подтверждении забирает готовый токен (Opcode 291). Если включен 2FA-пароль, запрашивает его через `password_callback` или интерактивно.
+- **`await close() -> None`**:  
+  Корректно закрывает WebSocket-соединение. Класс также поддерживает контекстный менеджер `async with`.
+
+#### Пример использования в веб-приложении:
+```python
+async with await MaxClient.create_qr_session() as session:
+    # Отдаем ссылку или картинку фронтенду:
+    qr_data_url = session.to_data_url()
+    
+    # Ожидаем сканирования камерой приложения MAX:
+    token, user = await session.wait_for_login()
+    print(f"Пользователь {user.display_name} вошел! Токен: {token}")
+```
+
+---
+
+### Функции модуля `auth`
+
+#### `login_by_qr(...)`
+```python
+async def login_by_qr(
+    qr_callback: Optional[Callable[[str, str], Union[Awaitable[None], None]]] = None,
+    password_callback: Optional[Callable[[], Union[Awaitable[str], str]]] = None,
+    base_ws_url: str = DEFAULT_WS_URL,
+    app_version: str = "26.11.9",
+    timeout: float = 120.0,
+) -> tuple[str, User]
+```
+Выполняет полный цикл авторизации по QR-коду. Если `qr_callback=None`, выводит высококонтрастный QR-код и инструкцию в терминал. Возвращает кортеж `(token, user)`.
+
+#### `generate_qr_svg(data: str, border: int = 2) -> str`
+Генерирует автономную SVG-разметку QR-кода из любой строки или URL.
+
+#### `generate_qr_data_url(data: str, border: int = 2) -> str`
+Генерирует Base64 Data URL (`data:image/svg+xml;base64,...`) для отображения в теге `<img>` на сайте.
+
+#### `render_qr_ascii(data: str, border: int = 2) -> str`
+Формирует терминальный высококонтрастный QR-код с использованием ANSI-цветов (черный цвет модулей на чистом белом фоне quiet zone) и символов Unicode half-block.
+
+#### `extract_token_from_browser(browser_name=None, profile_name=None) -> Optional[BrowserTokenResult]`
+Сканирует файлы хранилища LevelDB (`.ldb`/`.log`) Chromium-браузеров (Chrome, Yandex, Edge, Opera, Opera GX, Brave, Vivaldi) на Windows, macOS и Linux. Возвращает `BrowserTokenResult` с полями `token`, `viewer_id`, `browser`, `profile`, `source_file`.
+
+#### `login_by_phone(phone: str, code_callback=None, ...) -> tuple[str, User]`
+Интерактивный вход по номеру телефона через SMS/Push проверочный код (Opcode 17 и 18).
+
+#### `save_token_to_env(token: str, env_file_path=".env", var_name="MAX_TOKEN") -> bool`
+Записывает или атомарно обновляет переменную с токеном в `.env`-файле с сохранением комментариев и существующих настроек.
+
+---
+
+### Консольная утилита CLI (`max-auth`)
+
+Библиотека включает встроенный CLI-инструмент для терминала:
+
+```bash
+# Запуск через модуль Python:
+python -m max_library auth [OPTIONS]
+
+# Либо через консольную команду (после pip install):
+max-auth [OPTIONS]
+```
+
+#### Доступные параметры:
+
+| Флаг | Описание |
+|------|----------|
+| `--qr` | Авторизация по QR-коду (сканирование в приложении MAX на смартфоне) |
+| `-b, --browser [NAME]` | Поиск токена в браузере (`all`, `yandex`, `chrome`, `edge`, `opera`, `brave`) |
+| `-p, --phone PHONE` | Авторизация по номеру телефона (`+79991234567`) |
+| `-s, --save [FILE]` | Сохранить полученный токен в `.env` (по умолчанию `.env`) |
+| `--var VAR` | Имя переменной для `--save` (по умолчанию `MAX_TOKEN`) |
+| `-c, --check` | Проверить полученный токен на сервере MAX API |
+| `-q, --quiet` | Вывести только строку токена (для скриптов и `export MAX_TOKEN=$(...)`) |
+| `--json` | Вывести результат в структурированном формате JSON |
+
+#### Примеры вызова CLI:
+```bash
+# Получить токен по QR-коду и сохранить в .env:
+python -m max_library auth --qr --save
+
+# Найти токен в Chrome и сохранить в файл config/.env:
+python -m max_library auth -b chrome --save config/.env
+
+# Экспортировать токен в переменную окружения Linux/macOS:
+export MAX_TOKEN=$(python -m max_library auth --qr -q)
+```
+
+---
+
+## 3. Система фильтрации сообщений (`filters`)
 
 Библиотека предоставляет декларативную систему фильтров, аналогичную современным фреймворкам для ботов:
 

@@ -14,7 +14,14 @@ from max_library.auth.browser import (
     get_browser_search_paths,
 )
 from max_library.auth.phone import login_by_phone, verify_token
-from max_library.auth.qr import login_by_qr, render_qr_ascii
+from max_library.auth.qr import (
+    QRAuthSession,
+    create_qr_session,
+    generate_qr_data_url,
+    generate_qr_svg,
+    login_by_qr,
+    render_qr_ascii,
+)
 from max_library.auth.storage import save_token_to_env
 from max_library.models.user import User
 
@@ -322,4 +329,61 @@ async def test_max_client_from_qr(tmp_path):
         assert client.token == "An_ClientQRToken123"
         assert client.me.display_name == "FromQR User"
         assert "MAX_TOKEN=An_ClientQRToken123" in env_file.read_text(encoding="utf-8")
+
+
+def test_generate_qr_svg_and_data_url():
+    url = "https://max.ru/:auth/test-web-url"
+    svg = generate_qr_svg(url)
+    assert "<svg" in svg
+    assert "</svg>" in svg
+
+    data_url = generate_qr_data_url(url)
+    assert data_url.startswith("data:image/svg+xml;base64,")
+    assert len(data_url) > 100
+
+
+@pytest.mark.asyncio
+async def test_qr_auth_session_flow():
+    with patch("max_library.auth.qr.MaxTransport") as mock_transport_cls:
+        mock_transport = MagicMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.close = AsyncMock()
+        mock_transport.send_request = AsyncMock(
+            side_effect=[
+                {"opcode": 6, "payload": {}},  # Handshake
+                {
+                    "opcode": 288,
+                    "payload": {
+                        "trackId": "session-track-id",
+                        "qrLink": "https://max.ru/:auth/session-track-id",
+                        "ttl": 120000,
+                        "pollingInterval": 50,
+                    },
+                },  # Opcode 288
+                {
+                    "opcode": 289,
+                    "payload": {"status": {"loginAvailable": True}},
+                },  # Opcode 289
+                {
+                    "opcode": 291,
+                    "payload": {
+                        "tokenAttrs": {"LOGIN": {"token": "An_SessionToken777"}},
+                        "profile": {"id": 777, "name": "Session User"},
+                    },
+                },  # Opcode 291
+            ]
+        )
+        mock_transport_cls.return_value = mock_transport
+
+        async with await MaxClient.create_qr_session() as session:
+            assert session.track_id == "session-track-id"
+            assert session.qr_link == "https://max.ru/:auth/session-track-id"
+            assert "<svg" in session.to_svg()
+            assert session.to_data_url().startswith("data:image/svg+xml;base64,")
+
+            token, user = await session.wait_for_login()
+            assert token == "An_SessionToken777"
+            assert user.id == 777
+            assert user.display_name == "Session User"
+
 
