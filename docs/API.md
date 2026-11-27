@@ -53,7 +53,51 @@ MaxClient(
 - **`heartbeat_interval`**: Интервал отправки пинг-пакетов (по умолчанию `45.0` с).
 - **`heartbeat_timeout`**: Таймаут ожидания понга перед переподключением (по умолчанию `120.0` с).
 
-> **Как получить `token`:** Откройте веб-клиент MAX ([web.max.ru](https://web.max.ru)) в браузере -> `F12` -> вкладка `Network` -> фильтр `Socket` -> `F5` -> выберите `websocket` -> вкладка `Messages` -> 3-е сверху `↑ Binary Message` -> режим `UTF-8` -> скопируйте значение после слова `token` между служебными знаками (например, `An_...`).
+> **Как получить `token`:**
+> 1. **Автоматически:** через CLI `python -m max_library auth` или в коде `client = MaxClient.from_browser()`.
+> 2. **Вручную:** откройте [web.max.ru](https://web.max.ru) в браузере -> `F12` -> вкладка `Application` -> `Local Storage` -> `https://web.max.ru` -> ключ `__oneme_auth` (значение `An_...`). Либо вкладка `Network` -> `Socket` -> `F5` -> `websocket` -> `Messages` -> 3-е исходящее `↑ Binary Message` (UTF-8).
+
+### Фабричные методы и хелперы авторизации
+
+#### `MaxClient.from_browser(...)`
+```python
+@classmethod
+def from_browser(
+    cls,
+    browser_name: Optional[str] = None,
+    profile_name: Optional[str] = None,
+    auto_save_env: bool = False,
+    env_file_path: str = ".env",
+    var_name: str = "MAX_TOKEN",
+    **client_kwargs,
+) -> MaxClient
+```
+Создает экземпляр `MaxClient`, автоматически извлекая токен из локального хранилища браузера (Chrome, Яндекс Браузер, Edge, Opera, Opera GX, Brave, Vivaldi). Если `auto_save_env=True`, автоматически записывает/обновляет переменную в файле `.env`.
+
+#### `MaxClient.get_token_from_browser(...)`
+```python
+@classmethod
+def get_token_from_browser(
+    cls,
+    browser_name: Optional[str] = None,
+    profile_name: Optional[str] = None,
+) -> Optional[str]
+```
+Сканирует хранилища браузеров и возвращает строку токена (`An_...`) либо `None`.
+
+#### `MaxClient.verify_token(token: str, ...)`
+```python
+@classmethod
+async def verify_token(cls, token: str, base_ws_url: str = ...) -> Optional[User]
+```
+Проверяет токен на сервере MAX (выполняет рукопожатие Opcode 6 и Opcode 19). Возвращает профиль `User` при успехе или `None`, если сессия недействительна.
+
+#### `MaxClient.save_token_to_env(...)`
+```python
+@classmethod
+def save_token_to_env(cls, token: str, env_file_path: str = ".env", var_name: str = "MAX_TOKEN") -> None
+```
+Безопасно сохраняет или обновляет значение токена в файле `.env`, сохраняя комментарии и структуру файла.
 
 ### Жизненный цикл
 

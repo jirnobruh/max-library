@@ -1,8 +1,8 @@
-﻿"""
+"""
 Contact and Name models for MAX.
 """
 from typing import Any
-from pydantic import Field, PrivateAttr
+from pydantic import Field, PrivateAttr, model_validator
 from max_library.models.base import MaxBaseModel
 
 
@@ -30,6 +30,15 @@ class Contact(MaxBaseModel):
     options: dict[str, Any] | list[Any] | None = None
 
     _client: Any = PrivateAttr(default=None)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_contact_data(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("names") and data.get("name"):
+                data["names"] = [{"name": data["name"]}]
+        return data
+
 
     def bind_client(self, client: Any) -> "Contact":
         self._client = client

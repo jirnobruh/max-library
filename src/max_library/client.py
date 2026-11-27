@@ -380,6 +380,155 @@ class MaxClient:
 
         return user
 
+    @classmethod
+    def get_token_from_browser(
+        cls,
+        browser_name: Optional[str] = None,
+        profile_name: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Discovers and extracts the MAX authorization token from local browser storage.
+        """
+        from max_library.auth.browser import extract_token_from_browser
+        res = extract_token_from_browser(browser_name=browser_name, profile_name=profile_name)
+        return res.token if res else None
+
+    @classmethod
+    def from_browser(
+        cls,
+        browser_name: Optional[str] = None,
+        profile_name: Optional[str] = None,
+        auto_save_env: bool = False,
+        env_file_path: str = ".env",
+        var_name: str = "MAX_TOKEN",
+        **client_kwargs,
+    ) -> "MaxClient":
+        """
+        Factory method to instantiate a MaxClient using token automatically extracted from browser.
+
+        :param browser_name: Optional browser filter (chrome, yandex, edge, opera, brave, etc.)
+        :param profile_name: Optional profile name (Default, Profile 1, etc.)
+        :param auto_save_env: If True, saves the extracted token to .env file
+        :param env_file_path: Path to .env file (default: '.env')
+        :param var_name: Name of environment variable to set (default: 'MAX_TOKEN')
+        :param client_kwargs: Additional kwargs passed to MaxClient constructor
+        :return: Initialized MaxClient instance
+        :raises AuthError: If no token was found in browser storage
+        """
+        token = cls.get_token_from_browser(browser_name=browser_name, profile_name=profile_name)
+        if not token:
+            raise AuthError(
+                error="token_not_found",
+                message=(
+                    "Could not extract MAX token from browser storage. "
+                    "Make sure you are logged in to https://web.max.ru in a supported browser."
+                ),
+            )
+        if auto_save_env:
+            cls.save_token_to_env(token, env_file_path=env_file_path, var_name=var_name)
+
+        return cls(token=token, **client_kwargs)
+
+    @classmethod
+    async def from_qr(
+        cls,
+        qr_callback: Optional[Callable[[str, str], Union[Awaitable[None], None]]] = None,
+        password_callback: Optional[Callable[[], Union[Awaitable[str], str]]] = None,
+        auto_save_env: bool = False,
+        env_file_path: str = ".env",
+        var_name: str = "MAX_TOKEN",
+        base_ws_url: str = DEFAULT_WS_URL,
+        timeout: float = 120.0,
+        **client_kwargs,
+    ) -> "MaxClient":
+        """
+        Interactively logs in by generating a QR code to be scanned with the MAX mobile app,
+        and returns an initialized MaxClient instance.
+
+        :param qr_callback: Optional callback receiving (qr_link, track_id).
+                            If None, prints ANSI QR code directly to terminal.
+        :param password_callback: Optional callback to provide 2FA password if required.
+        :param auto_save_env: If True, saves the obtained token to .env file.
+        :param env_file_path: Path to .env file (default: '.env').
+        :param var_name: Name of environment variable to set (default: 'MAX_TOKEN').
+        :param base_ws_url: WebSocket URL to connect to.
+        :param timeout: Maximum seconds to wait for QR scan confirmation (default: 120s).
+        :param client_kwargs: Additional kwargs passed to MaxClient constructor.
+        :return: Initialized MaxClient instance.
+        """
+        from max_library.auth.qr import login_by_qr
+
+        token, user = await login_by_qr(
+            qr_callback=qr_callback,
+            password_callback=password_callback,
+            base_ws_url=base_ws_url,
+            timeout=timeout,
+        )
+        if auto_save_env:
+            cls.save_token_to_env(token, env_file_path=env_file_path, var_name=var_name)
+
+        client = cls(token=token, base_ws_url=base_ws_url, **client_kwargs)
+        client.me = user
+        return client
+
+    @classmethod
+    async def login_by_qr(
+        cls,
+        qr_callback: Optional[Callable[[str, str], Union[Awaitable[None], None]]] = None,
+        password_callback: Optional[Callable[[], Union[Awaitable[str], str]]] = None,
+        base_ws_url: str = DEFAULT_WS_URL,
+        timeout: float = 120.0,
+    ) -> tuple[str, User]:
+        """
+        Performs authentication by QR code scanned by the MAX mobile app.
+        """
+        from max_library.auth.qr import login_by_qr
+        return await login_by_qr(
+            qr_callback=qr_callback,
+            password_callback=password_callback,
+            base_ws_url=base_ws_url,
+            timeout=timeout,
+        )
+
+    @classmethod
+    def save_token_to_env(
+        cls,
+        token: str,
+        env_file_path: str = ".env",
+        var_name: str = "MAX_TOKEN",
+    ) -> None:
+        """
+        Safely saves or updates the token in a .env file without modifying other variables.
+        """
+        from max_library.auth.storage import save_token_to_env
+        save_token_to_env(token=token, env_file_path=env_file_path, var_name=var_name)
+
+    @classmethod
+    async def login_by_phone(
+        cls,
+        phone: str,
+        code_callback: Optional[Callable[[], Union[Awaitable[str], str]]] = None,
+        base_ws_url: str = DEFAULT_WS_URL,
+    ) -> tuple[str, User]:
+        """
+        Performs authentication by phone number using SMS/Push verification code.
+        """
+        from max_library.auth.phone import login_by_phone
+        return await login_by_phone(phone=phone, code_callback=code_callback, base_ws_url=base_ws_url)
+
+    @classmethod
+    async def verify_token(
+        cls,
+        token: str,
+        base_ws_url: str = DEFAULT_WS_URL,
+    ) -> Optional[User]:
+        """
+        Verifies if a MAX token is valid by performing handshake and session initialization.
+        """
+        from max_library.auth.phone import verify_token
+        return await verify_token(token=token, base_ws_url=base_ws_url)
+
+
     # =========================================================================
     # Messaging (Opcode 64, 66, 67, 49)
     # =========================================================================

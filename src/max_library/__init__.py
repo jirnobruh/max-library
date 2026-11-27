@@ -26,11 +26,13 @@ from max_library.models import (
     User,
     EMOJIS,
 )
+from max_library import auth
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 
 __all__ = [
     "MaxClient",
+    "auth",
     "filters",
     "Filter",
     "MaxError",
@@ -53,3 +55,4 @@ __all__ = [
     "User",
     "EMOJIS",
 ]
+
