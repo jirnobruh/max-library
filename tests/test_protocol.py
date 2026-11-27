@@ -45,6 +45,6 @@ def test_encode_and_decode_compressed_packet():
 
 def test_decode_ext_type_1():
     # ExtType 1 is used for BigInt / ID numbers
-    packed_val = msgpack.packb(64768666)
+    packed_val = msgpack.packb(12345678)
     res = ext_hook(1, packed_val)
-    assert res == 64768666
+    assert res == 12345678

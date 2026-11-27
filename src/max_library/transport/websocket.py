@@ -5,8 +5,11 @@ Handles connection lifecycle, heartbeat, auto-reconnect, and RPC dispatching (se
 import asyncio
 import json
 import logging
+import socket
+import ssl
 import time
 from typing import Any, Awaitable, Callable, Optional
+import urllib.parse
 from uuid import uuid4
 
 try:
@@ -38,6 +41,50 @@ DEFAULT_HEADERS = {
     "Cache-Control": "no-cache",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
 }
+
+
+async def resolve_fast_ws_endpoint(url: str, timeout: float = 1.5) -> tuple[str, Optional[str]]:
+    """
+    Races DNS resolved IP addresses to find the fastest reachable node.
+    Prevents connection hangs when one of the DNS cluster nodes is unresponsive.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host = parsed.hostname
+        if not host or host.replace(".", "").isdigit():
+            return url, None
+
+        port = parsed.port or (443 if parsed.scheme in ("wss", "https") else 80)
+        loop = asyncio.get_running_loop()
+
+        addr_info = await loop.getaddrinfo(host, port, family=socket.AF_INET, type=socket.SOCK_STREAM)
+        ips = list(dict.fromkeys(info[4][0] for info in addr_info))
+        if len(ips) <= 1:
+            return url, None
+
+        async def check_ip(ip: str) -> Optional[str]:
+            try:
+                r, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=timeout)
+                w.close()
+                await w.wait_closed()
+                return ip
+            except Exception:
+                return None
+
+        tasks = [asyncio.create_task(check_ip(ip)) for ip in ips]
+        for completed in asyncio.as_completed(tasks):
+            res = await completed
+            if res:
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+                netloc = f"{res}:{port}" if parsed.port else res
+                new_url = urllib.parse.urlunparse(parsed._replace(netloc=netloc))
+                return new_url, host
+    except Exception as e:
+        logger.debug(f"Fast endpoint resolution fallback: {e}")
+
+    return url, None
 
 
 class MaxTransport:
@@ -122,12 +169,17 @@ class MaxTransport:
         logger.debug(f"Connecting to WebSocket: {self.ws_url}")
 
         try:
-            self._ws = await ws_connect(
-                self.ws_url,
-                additional_headers=self.headers,
-                ping_interval=self.ping_interval,
-                ping_timeout=self.ping_timeout,
-            )
+            target_url, server_hostname = await resolve_fast_ws_endpoint(self.ws_url)
+            connect_kwargs: dict[str, Any] = {
+                "additional_headers": self.headers,
+                "ping_interval": self.ping_interval,
+                "ping_timeout": self.ping_timeout,
+            }
+            if server_hostname:
+                connect_kwargs["server_hostname"] = server_hostname
+                connect_kwargs["ssl"] = ssl.create_default_context()
+
+            self._ws = await ws_connect(target_url, **connect_kwargs)
             self._is_connected = True
             self._last_received_time = time.monotonic()
             logger.info("WebSocket connected successfully")

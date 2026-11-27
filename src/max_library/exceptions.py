@@ -9,6 +9,9 @@ class MaxError(Exception):
     pass
 
 
+MaxClientError = MaxError
+
+
 class MaxConnectionError(MaxError):
     """Raised when WebSocket connection fails or disconnects unexpectedly."""
     pass
